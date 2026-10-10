@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: careerai
+      POSTGRES_USER: careerai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-careerai-local-only}
+    ports:
+      - "5432:5432"
+    volumes:
+      - careerai-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U careerai -d careerai"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  api:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://careerai:${POSTGRES_PASSWORD:-careerai-local-only}@db:5432/careerai
+      JWT_SECRET: ${JWT_SECRET:-replace-this-development-secret-before-sharing}
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  careerai-postgres:
