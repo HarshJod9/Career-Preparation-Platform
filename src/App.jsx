@@ -77,7 +77,7 @@ function AuthPage({ mode, onBack, onSuccess, onModeChange }) {
     <form onSubmit={submit} className="auth-form">{register && <label>Your name<input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Harsh" autoComplete="name" required /></label>}<label>Email address<input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="you@example.com" autoComplete="email" required /></label><label>Password<input value={password} onChange={e => setPassword(e.target.value)} type="password" minLength={8} placeholder="At least 8 characters" autoComplete={register ? 'new-password' : 'current-password'} required /></label>
       <p className="demo-note"><CircleHelp size={14} /> Your account and profile are saved to the project database.</p>{error && <div className="form-error" role="alert">{error}</div>}<button className="button-primary auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait…' : 'Continue to dashboard'} {!submitting && <ArrowRight size={16} />}</button></form>
     <div className="auth-switch">{register ? 'Already have a profile?' : 'New to CareerAI?'} <button onClick={() => onModeChange(register ? 'login' : 'register')}>{register ? 'Log in' : 'Create an account'}</button></div>
-  </section><p className="auth-foot">Your career profile stays in this browser in this demo.</p></main>
+  </section><p className="auth-foot">Your career profile is stored securely with your account for this project demo.</p></main>
 }
 
 function Dashboard({ user, onLogout }) {
@@ -92,6 +92,15 @@ function Dashboard({ user, onLogout }) {
   const [assistantQuestion, setAssistantQuestion] = useState('')
   const [assistantMessages, setAssistantMessages] = useState([])
   const [assistantBusy, setAssistantBusy] = useState(false)
+  const [interviewRole, setInterviewRole] = useState(user?.target_role || '')
+  const [interviewDifficulty, setInterviewDifficulty] = useState('intermediate')
+  const [interviewQuestionCount, setInterviewQuestionCount] = useState(5)
+  const [interviewSession, setInterviewSession] = useState(null)
+  const [interviewHistory, setInterviewHistory] = useState([])
+  const [interviewAnswer, setInterviewAnswer] = useState('')
+  const [interviewFeedback, setInterviewFeedback] = useState(null)
+  const [interviewBusy, setInterviewBusy] = useState(false)
+  const [interviewError, setInterviewError] = useState('')
   const fileRef = useRef(null)
   const firstName = user?.name || 'there'
 
@@ -108,6 +117,12 @@ function Dashboard({ user, onLogout }) {
     }).catch(error => { if (active) setUploadError(error.message || 'Could not load your saved profile.') })
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    if (section !== 'interview') return
+    apiRequest('/api/interviews').then(result => setInterviewHistory(result.interviews || []))
+      .catch(error => setInterviewError(error.message || 'Could not load interview history.'))
+  }, [section])
 
   async function addResume(file) {
     if (!file) return
@@ -151,6 +166,40 @@ function Dashboard({ user, onLogout }) {
     } finally { setAssistantBusy(false) }
   }
 
+  async function startInterview(event) {
+    event.preventDefault()
+    setInterviewError(''); setInterviewFeedback(null); setInterviewBusy(true)
+    try {
+      const session = await apiRequest('/api/interviews', { method: 'POST', body: JSON.stringify({ role: interviewRole || null, difficulty: interviewDifficulty, question_count: Number(interviewQuestionCount) }) })
+      setInterviewSession(session); setInterviewAnswer('')
+      setInterviewHistory(history => [session, ...history.filter(item => item.id !== session.id)].slice(0, 20))
+    } catch (error) { setInterviewError(error.message || 'Could not start the interview.') }
+    finally { setInterviewBusy(false) }
+  }
+
+  async function submitInterviewAnswer(event) {
+    event.preventDefault()
+    if (!interviewSession || interviewAnswer.trim().length < 10 || interviewBusy) return
+    setInterviewError(''); setInterviewBusy(true)
+    try {
+      const result = await apiRequest(`/api/interviews/${interviewSession.id}/answers`, { method: 'POST', body: JSON.stringify({ answer: interviewAnswer }) })
+      setInterviewSession(result.interview); setInterviewFeedback(result.feedback); setInterviewAnswer('')
+      setInterviewHistory(history => history.map(item => item.id === result.interview.id ? result.interview : item))
+    } catch (error) { setInterviewError(error.message || 'Could not evaluate your answer.') }
+    finally { setInterviewBusy(false) }
+  }
+
+  async function openInterview(id) {
+    setInterviewError(''); setInterviewFeedback(null); setInterviewBusy(true)
+    try {
+      const session = await apiRequest(`/api/interviews/${id}`)
+      setInterviewSession(session); setInterviewAnswer('')
+      if (session.status === 'active' && session.turns?.length) setInterviewFeedback(session.turns[session.turns.length - 1])
+    }
+    catch (error) { setInterviewError(error.message || 'Could not open that interview.') }
+    finally { setInterviewBusy(false) }
+  }
+
   const title = navItems.find(item => item.id === section)?.label || 'Overview'
   const requiredSkills = roles[targetRole] || []
   const matchingSkills = requiredSkills.filter(skill => skills.includes(skill))
@@ -184,6 +233,18 @@ function Dashboard({ user, onLogout }) {
         <div className="page-heading"><div className="eyebrow"><span className="eyebrow-dot" /> CAREER PROFILE</div><h1>Skill gap</h1><p>Compare skills in your resume with the skills commonly used in your target role.</p></div>
         <section className="panel role-select-panel"><div className="panel-heading"><div><h2>Target role</h2><p>Choose a role to see required skills and your current matches.</p></div><span className="panel-target-icon"><BriefcaseBusiness size={18} /></span></div><label className="role-input-label" htmlFor="gap-role">TARGET ROLE</label><select id="gap-role" className="role-input" value={targetRole} onChange={updateRole}><option value="">Choose a target role</option>{Object.keys(roles).map(role => <option key={role}>{role}</option>)}</select></section>
         {!targetRole ? <div className="skill-empty gap-empty"><span className="skill-empty-icon"><Target size={20} /></span><span><strong>Choose your target role</strong><small>We’ll compare its required skills against your resume.</small></span></div> : <><div className="gap-summary"><span className="gap-score">{readiness === null ? '—' : readiness}<small>{readiness === null ? '' : '%'}</small></span><span><strong>{resume ? `${matchingSkills.length} of ${requiredSkills.length} skills matched` : 'Upload a resume to see your matches'}</strong><small>{!resume ? `Your resume will be compared with ${targetRole} skills.` : missingSkills.length ? `${missingSkills.length} skills to build toward ${targetRole}` : `Your resume matches all listed skills for ${targetRole}`}</small></span></div><div className="gap-columns"><section className="panel gap-list"><div className="panel-heading"><div><h2>Your skills</h2><p>{skills.length} identified from resume</p></div><span className="gap-count good">{matchingSkills.length}</span></div>{skills.length ? <div className="gap-skill-list">{skills.map(skill => <div className="gap-skill" key={skill}><span className="gap-skill-icon present"><Check size={14} /></span><span>{skill}</span>{requiredSkills.includes(skill) && <small>Required</small>}</div>)}</div> : <div className="skill-empty"><span className="skill-empty-icon"><FileText size={19} /></span><span><strong>{resume ? 'No skills identified' : 'Add your resume'}</strong><small>{resume ? 'Try a text-based PDF with skills listed.' : 'Upload one to identify your existing skills.'}</small></span></div>}</section><section className="panel gap-list"><div className="panel-heading"><div><h2>Required skills</h2><p>Common skills for {targetRole}</p></div><span className="gap-count">{resume ? missingSkills.length : requiredSkills.length}</span></div><div className="gap-skill-list">{requiredSkills.map(skill => <div className="gap-skill" key={skill}><span className={skills.includes(skill) ? 'gap-skill-icon present' : 'gap-skill-icon missing'}>{skills.includes(skill) ? <Check size={14} /> : <Plus size={14} />}</span><span>{skill}</span><small>{skills.includes(skill) ? 'In your resume' : resume ? 'Skill to build' : 'Compare after upload'}</small></div>)}</div></section></div><p className="analysis-method-note">Skill comparisons use a starter list and keyword matching. They are guidance, not a hiring score.</p></>}
+      </> : section === 'interview' ? <>
+        <div className="page-heading"><div className="eyebrow"><span className="eyebrow-dot" /> PRACTICE WITH PURPOSE</div><h1>AI interview practice</h1><p>Answer realistic questions for your target role and get feedback on clarity, relevance, and evidence.</p></div>
+        {!interviewSession || interviewSession.status === 'completed' ? <section className="panel interview-setup"><div className="panel-heading"><div><h2>{interviewSession?.status === 'completed' ? 'Interview complete' : 'Set up a practice interview'}</h2><p>{interviewSession?.status === 'completed' ? `Your average score was ${interviewSession.average_score ?? '—'} out of 100.` : 'Choose a role and difficulty. Your answers and feedback are saved to your account.'}</p></div><span className="panel-target-icon"><BrainCircuit size={18} /></span></div>
+          <form className="interview-options" onSubmit={startInterview}><label>Target role<select className="role-input" value={interviewRole} onChange={event => setInterviewRole(event.target.value)} required><option value="">Choose a role</option>{Object.keys(roles).map(role => <option key={role}>{role}</option>)}</select></label><label>Difficulty<select className="role-input" value={interviewDifficulty} onChange={event => setInterviewDifficulty(event.target.value)}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label><label>Questions<select className="role-input" value={interviewQuestionCount} onChange={event => setInterviewQuestionCount(event.target.value)}>{[3, 5, 7, 10].map(count => <option key={count} value={count}>{count} questions</option>)}</select></label><button className="button-primary compact" disabled={interviewBusy || !interviewRole}>{interviewBusy ? 'Preparing…' : 'Start interview'} <ArrowRight size={15} /></button></form>
+          <p className="interview-privacy-note">This feature requires the optional OpenAI configuration. Interview questions, your answers, and recent practice context are sent to OpenAI for feedback and saved in your account history.</p>
+          {interviewSession?.status === 'completed' && <div className="interview-review">{interviewSession.turns.map((turn, index) => <article className="interview-review-card" key={`${interviewSession.id}-${index}`}><div className="review-card-heading"><strong>Question {index + 1}</strong><span>{turn.score}/100</span></div><p className="review-question">{turn.question}</p><p className="review-answer">{turn.answer}</p><p>{turn.feedback}</p></article>)}</div>}
+        </section> : <section className="panel interview-live"><div className="interview-progress"><span>{interviewSession.role} · {interviewSession.difficulty}</span><span>Question {interviewSession.question_number} of {interviewSession.question_count}</span></div><h2>{interviewSession.current_question}</h2>
+          {interviewFeedback && <div className="interview-feedback"><div className="feedback-score"><strong>{interviewFeedback.score}</strong><small>/100</small></div><div><h3>Feedback on your answer</h3><p className="review-question">{interviewFeedback.question}</p><p>{interviewFeedback.feedback}</p><div className="feedback-columns"><div><strong>What worked</strong>{interviewFeedback.strengths.map((item, index) => <small key={index}>✓ {item}</small>)}</div><div><strong>Try next time</strong>{interviewFeedback.improvements.map((item, index) => <small key={index}>↗ {item}</small>)}</div></div></div></div>}
+          <form className="interview-answer-form" onSubmit={submitInterviewAnswer}><label htmlFor="interview-answer">Your answer</label><textarea id="interview-answer" value={interviewAnswer} onChange={event => setInterviewAnswer(event.target.value)} placeholder="Structure your response, then include a concrete example…" rows={7} maxLength={5000} disabled={interviewBusy} /><div><small>At least 10 characters · {interviewAnswer.length}/5000</small><button className="button-primary compact" disabled={interviewBusy || interviewAnswer.trim().length < 10}>{interviewBusy ? 'Reviewing…' : 'Submit answer'} <ArrowRight size={15} /></button></div></form>
+        </section>}
+        {interviewError && <p className="upload-error" role="alert">{interviewError}</p>}
+        {interviewHistory.length > 0 && <section className="panel interview-history"><div className="panel-heading"><div><h2>Recent practice</h2><p>Your last 20 interview sessions.</p></div><span className="panel-target-icon"><FileText size={17} /></span></div><div className="interview-history-list">{interviewHistory.map(item => <button key={item.id} className="interview-history-item" onClick={() => void openInterview(item.id)}><span><strong>{item.role}</strong><small>{new Date(item.created_at).toLocaleDateString()} · {item.difficulty} · {item.status}</small></span><span>{item.average_score == null ? 'In progress' : `${item.average_score}/100`}</span><ChevronRight size={16} /></button>)}</div></section>}
       </> : section === 'assistant' ? <>
         <div className="page-heading"><div className="eyebrow"><span className="eyebrow-dot" /> RETRIEVAL-AUGMENTED ASSISTANT</div><h1>AI career assistant</h1><p>Ask about your resume, skill gaps, or what a target role involves. Answers use retrieved project knowledge and cite their sources.</p></div>
         <section className="panel assistant-panel">
