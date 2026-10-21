@@ -22,6 +22,9 @@ services:
       DATABASE_URL: postgresql+psycopg://careerai:${POSTGRES_PASSWORD:-careerai-local-only}@db:5432/careerai
       JWT_SECRET: ${JWT_SECRET:-replace-this-development-secret-before-sharing}
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      RAG_CHAT_MODEL: ${RAG_CHAT_MODEL:-}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-3-small}
     ports:
       - "8000:8000"
     depends_on:

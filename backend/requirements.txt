@@ -5,3 +5,4 @@ psycopg[binary]>=3.2,<4.0
 python-jose[cryptography]>=3.3,<4.0
 python-multipart>=0.0.20,<1.0
 pypdf>=5.0,<7.0
+openai>=1.82,<3.0

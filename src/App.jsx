@@ -89,6 +89,9 @@ function Dashboard({ user, onLogout }) {
   const [resume, setResume] = useState(null)
   const [skills, setSkills] = useState([])
   const [targetRole, setTargetRole] = useState(user?.target_role || '')
+  const [assistantQuestion, setAssistantQuestion] = useState('')
+  const [assistantMessages, setAssistantMessages] = useState([])
+  const [assistantBusy, setAssistantBusy] = useState(false)
   const fileRef = useRef(null)
   const firstName = user?.name || 'there'
 
@@ -133,6 +136,21 @@ function Dashboard({ user, onLogout }) {
     setResume(null); setSkills([]); setAnalysisStatus('')
   }
 
+  async function askAssistant(event) {
+    event.preventDefault()
+    const question = assistantQuestion.trim()
+    if (!question || assistantBusy) return
+    setAssistantMessages(messages => [...messages, { role: 'user', text: question }])
+    setAssistantQuestion('')
+    setAssistantBusy(true)
+    try {
+      const result = await apiRequest('/api/assistant/ask', { method: 'POST', body: JSON.stringify({ question }) })
+      setAssistantMessages(messages => [...messages, { role: 'assistant', text: result.answer, sources: result.sources || [] }])
+    } catch (error) {
+      setAssistantMessages(messages => [...messages, { role: 'assistant', text: error.message || 'The assistant could not answer. Please try again.' }])
+    } finally { setAssistantBusy(false) }
+  }
+
   const title = navItems.find(item => item.id === section)?.label || 'Overview'
   const requiredSkills = roles[targetRole] || []
   const matchingSkills = requiredSkills.filter(skill => skills.includes(skill))
@@ -158,7 +176,7 @@ function Dashboard({ user, onLogout }) {
           <div className={analyzing ? 'upload-drop upload-busy' : 'upload-drop'} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addResume(event.dataTransfer.files?.[0]) }}><span className="upload-icon">{analyzing ? <span className="loader" /> : <Upload size={20} />}</span><strong>{analyzing ? 'Reading your resume…' : resume ? 'Replace your resume' : 'Drop your resume here'}</strong><span>PDF · Max 10 MB</span><button className="button-secondary" disabled={analyzing} onClick={() => fileRef.current?.click()}>Choose a file</button><input ref={fileRef} type="file" accept=".pdf,application/pdf" onChange={event => { void addResume(event.target.files?.[0]); event.target.value = '' }} hidden /></div>
           {uploadError && <p className="upload-error" role="alert">{uploadError}</p>}
           {analysisStatus && <p className={skills.length ? 'analysis-status' : 'analysis-status status-warning'} role="status">{analysisStatus}</p>}
-          <div className="privacy-note"><CircleHelp size={15} /><span><strong>Private browser storage</strong><small>The file stays in this browser on this device. It is not sent to a server.</small></span></div>
+          <div className="privacy-note"><CircleHelp size={15} /><span><strong>Private account storage</strong><small>Your resume is stored in this project's PostgreSQL database and only returned to your signed-in account. AI indexing sends extracted text to OpenAI only when an API key is configured.</small></span></div>
           {resume && <div className="uploaded-file"><span className="resume-file-icon"><FileText size={18} /></span><span><strong>{resume.name}</strong><small>{(resume.size / 1024 / 1024).toFixed(2)} MB · Added {new Date(resume.uploadedAt).toLocaleDateString()}</small></span><span className="file-saved"><Check size={14} /> Saved</span><button className="remove-file" onClick={() => void deleteResume()}>Remove</button></div>}
         </section>
         <section className="panel skills-panel analysis-placeholder"><div className="panel-heading"><div><h2>Extracted skills</h2><p>Skills found in your resume text.</p></div><span className="panel-target-icon"><BrainCircuit size={18} /></span></div>{skills.length ? <div className="skill-chip-row">{skills.map(skill => <span className="sample-chip" key={skill}><Check size={12} /> {skill}</span>)}</div> : <div className="skill-empty"><span className="skill-empty-icon"><BrainCircuit size={20} /></span><span><strong>{resume ? 'No recognizable skills found' : 'No resume analyzed yet'}</strong><small>{resume ? 'Try a text-based PDF with your skills listed.' : 'Upload your resume to see skills identified from its text.'}</small></span></div>}</section>
@@ -166,6 +184,17 @@ function Dashboard({ user, onLogout }) {
         <div className="page-heading"><div className="eyebrow"><span className="eyebrow-dot" /> CAREER PROFILE</div><h1>Skill gap</h1><p>Compare skills in your resume with the skills commonly used in your target role.</p></div>
         <section className="panel role-select-panel"><div className="panel-heading"><div><h2>Target role</h2><p>Choose a role to see required skills and your current matches.</p></div><span className="panel-target-icon"><BriefcaseBusiness size={18} /></span></div><label className="role-input-label" htmlFor="gap-role">TARGET ROLE</label><select id="gap-role" className="role-input" value={targetRole} onChange={updateRole}><option value="">Choose a target role</option>{Object.keys(roles).map(role => <option key={role}>{role}</option>)}</select></section>
         {!targetRole ? <div className="skill-empty gap-empty"><span className="skill-empty-icon"><Target size={20} /></span><span><strong>Choose your target role</strong><small>We’ll compare its required skills against your resume.</small></span></div> : <><div className="gap-summary"><span className="gap-score">{readiness === null ? '—' : readiness}<small>{readiness === null ? '' : '%'}</small></span><span><strong>{resume ? `${matchingSkills.length} of ${requiredSkills.length} skills matched` : 'Upload a resume to see your matches'}</strong><small>{!resume ? `Your resume will be compared with ${targetRole} skills.` : missingSkills.length ? `${missingSkills.length} skills to build toward ${targetRole}` : `Your resume matches all listed skills for ${targetRole}`}</small></span></div><div className="gap-columns"><section className="panel gap-list"><div className="panel-heading"><div><h2>Your skills</h2><p>{skills.length} identified from resume</p></div><span className="gap-count good">{matchingSkills.length}</span></div>{skills.length ? <div className="gap-skill-list">{skills.map(skill => <div className="gap-skill" key={skill}><span className="gap-skill-icon present"><Check size={14} /></span><span>{skill}</span>{requiredSkills.includes(skill) && <small>Required</small>}</div>)}</div> : <div className="skill-empty"><span className="skill-empty-icon"><FileText size={19} /></span><span><strong>{resume ? 'No skills identified' : 'Add your resume'}</strong><small>{resume ? 'Try a text-based PDF with skills listed.' : 'Upload one to identify your existing skills.'}</small></span></div>}</section><section className="panel gap-list"><div className="panel-heading"><div><h2>Required skills</h2><p>Common skills for {targetRole}</p></div><span className="gap-count">{resume ? missingSkills.length : requiredSkills.length}</span></div><div className="gap-skill-list">{requiredSkills.map(skill => <div className="gap-skill" key={skill}><span className={skills.includes(skill) ? 'gap-skill-icon present' : 'gap-skill-icon missing'}>{skills.includes(skill) ? <Check size={14} /> : <Plus size={14} />}</span><span>{skill}</span><small>{skills.includes(skill) ? 'In your resume' : resume ? 'Skill to build' : 'Compare after upload'}</small></div>)}</div></section></div><p className="analysis-method-note">Skill comparisons use a starter list and keyword matching. They are guidance, not a hiring score.</p></>}
+      </> : section === 'assistant' ? <>
+        <div className="page-heading"><div className="eyebrow"><span className="eyebrow-dot" /> RETRIEVAL-AUGMENTED ASSISTANT</div><h1>AI career assistant</h1><p>Ask about your resume, skill gaps, or what a target role involves. Answers use retrieved project knowledge and cite their sources.</p></div>
+        <section className="panel assistant-panel">
+          <div className="assistant-disclosure"><CircleHelp size={17} /><span><strong>How this assistant works</strong><small>It retrieves relevant resume sections and role guides, then drafts an answer from those sources. Add an OpenAI API key and a Responses API model in your local .env file to enable it. Resume text is sent to OpenAI for indexing and answering when configured.</small></span></div>
+          <div className="assistant-messages" aria-live="polite">
+            {!assistantMessages.length && <div className="assistant-empty"><span className="coming-icon"><MessageCircle size={20} /></span><strong>What would you like help with?</strong><small>Try “What skills should I improve for my target role?”</small></div>}
+            {assistantMessages.map((message, index) => <article className={`assistant-message ${message.role}`} key={`${message.role}-${index}`}><strong>{message.role === 'user' ? 'You' : 'CareerAI'}</strong><p>{message.text}</p>{message.sources?.length > 0 && <small>Sources: {message.sources.join(' · ')}</small>}</article>)}
+            {assistantBusy && <div className="assistant-thinking"><span className="loader" /> Retrieving sources and preparing an answer…</div>}
+          </div>
+          <form className="assistant-form" onSubmit={askAssistant}><label className="sr-only" htmlFor="assistant-question">Ask a career question</label><textarea id="assistant-question" value={assistantQuestion} onChange={event => setAssistantQuestion(event.target.value)} placeholder="Ask about your resume or career goals…" maxLength={1000} rows={3} disabled={assistantBusy} /><button className="button-primary compact" type="submit" disabled={assistantBusy || assistantQuestion.trim().length < 3}>{assistantBusy ? 'Thinking…' : 'Ask assistant'} <ArrowRight size={15} /></button></form>
+        </section>
       </> : <div className="coming-page"><span className="coming-icon">{(() => { const Icon = navItems.find(item => item.id === section)?.icon || Sparkles; return <Icon size={22} /> })()}</span><div className="eyebrow"><span className="eyebrow-dot" /> PHASE 2 FEATURE</div><h1>{title}</h1><p>This feature follows the Phase 1 foundation. Your dashboard, resume, and career profile are ready to explore.</p><button className="button-primary compact" onClick={() => setSection('overview')}>Back to overview <ArrowRight size={15} /></button></div>}</div>
     </main>
   </div>
